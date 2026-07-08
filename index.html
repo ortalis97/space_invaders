@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Space Invaders</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: monospace;
+    color: #0f0;
+  }
+  #wrap { text-align: center; }
+  canvas { background: #000; border: 2px solid #0f0; }
+  #info { margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="600" height="600"></canvas>
+  <div id="info">Arrow keys / A-D to move, Space to shoot</div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// player
+const player = { w: 40, h: 16, x: W / 2 - 20, y: H - 40, speed: 5 };
+let playerBullet = null; // only one on screen at a time
+
+// invaders
+const rows = 5, cols = 8;
+const invW = 30, invH = 20, gapX = 15, gapY = 15;
+const gridStartX = (W - (cols * (invW + gapX) - gapX)) / 2;
+const gridStartY = 50;
+let invaders = [];
+let invDir = 1;
+let invSpeed = 10; // px per step
+let invStepDelay = 30; // frames between steps
+let invStepTimer = 0;
+
+let enemyBullets = [];
+
+let score = 0;
+let lives = 3;
+let gameOver = false;
+let win = false;
+
+function resetInvaders() {
+  invaders = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      invaders.push({
+        x: gridStartX + c * (invW + gapX),
+        y: gridStartY + r * (invH + gapY),
+        alive: true
+      });
+    }
+  }
+}
+resetInvaders();
+
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ') e.preventDefault();
+});
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+function shoot() {
+  if (!playerBullet) {
+    playerBullet = { x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 10 };
+  }
+}
+
+let spacePrev = false;
+
+function update() {
+  if (gameOver || win) return;
+
+  // player movement
+  if (keys['ArrowLeft'] || keys['a']) player.x -= player.speed;
+  if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
+  player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+  // shoot on space press (edge trigger)
+  if (keys[' '] && !spacePrev) shoot();
+  spacePrev = keys[' '];
+
+  // player bullet
+  if (playerBullet) {
+    playerBullet.y -= 8;
+    if (playerBullet.y < 0) playerBullet = null;
+  }
+
+  // invader movement (step based, classic style)
+  invStepTimer++;
+  if (invStepTimer >= invStepDelay) {
+    invStepTimer = 0;
+    let hitEdge = false;
+    for (const inv of invaders) {
+      if (!inv.alive) continue;
+      const nextX = inv.x + invDir * invSpeed;
+      if (nextX < 0 || nextX + invW > W) hitEdge = true;
+    }
+    if (hitEdge) {
+      invDir *= -1;
+      for (const inv of invaders) inv.y += invH;
+    } else {
+      for (const inv of invaders) inv.x += invDir * invSpeed;
+    }
+  }
+
+  // enemy shooting (random)
+  if (Math.random() < 0.02) {
+    const alive = invaders.filter(i => i.alive);
+    if (alive.length) {
+      const shooter = alive[Math.floor(Math.random() * alive.length)];
+      enemyBullets.push({ x: shooter.x + invW / 2 - 2, y: shooter.y + invH, w: 4, h: 10 });
+    }
+  }
+  for (const b of enemyBullets) b.y += 5;
+  enemyBullets = enemyBullets.filter(b => b.y < H);
+
+  // collisions: player bullet vs invaders
+  if (playerBullet) {
+    for (const inv of invaders) {
+      if (!inv.alive) continue;
+      if (rectsOverlap(playerBullet, { x: inv.x, y: inv.y, w: invW, h: invH })) {
+        inv.alive = false;
+        playerBullet = null;
+        score += 10;
+        break;
+      }
+    }
+  }
+
+  // collisions: enemy bullets vs player
+  for (const b of enemyBullets) {
+    if (rectsOverlap(b, player)) {
+      b.hit = true;
+      lives--;
+      if (lives <= 0) gameOver = true;
+    }
+  }
+  enemyBullets = enemyBullets.filter(b => !b.hit);
+
+  // invaders reaching player = game over
+  for (const inv of invaders) {
+    if (inv.alive && inv.y + invH >= player.y) gameOver = true;
+  }
+
+  // win check
+  if (invaders.every(i => !i.alive)) win = true;
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // player
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+
+  // invaders
+  ctx.fillStyle = '#f00';
+  for (const inv of invaders) {
+    if (inv.alive) ctx.fillRect(inv.x, inv.y, invW, invH);
+  }
+
+  // bullets
+  ctx.fillStyle = '#fff';
+  if (playerBullet) ctx.fillRect(playerBullet.x, playerBullet.y, playerBullet.w, playerBullet.h);
+  ctx.fillStyle = '#ff0';
+  for (const b of enemyBullets) ctx.fillRect(b.x, b.y, b.w, b.h);
+
+  // HUD
+  ctx.fillStyle = '#0f0';
+  ctx.font = '16px monospace';
+  ctx.fillText('Score: ' + score, 10, 20);
+  ctx.fillText('Lives: ' + lives, W - 90, 20);
+
+  if (gameOver) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '32px monospace';
+    ctx.fillText('GAME OVER', W / 2 - 100, H / 2);
+    ctx.font = '16px monospace';
+    ctx.fillText('Refresh to play again', W / 2 - 90, H / 2 + 30);
+  } else if (win) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '32px monospace';
+    ctx.fillText('YOU WIN', W / 2 - 80, H / 2);
+    ctx.font = '16px monospace';
+    ctx.fillText('Refresh to play again', W / 2 - 90, H / 2 + 30);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
